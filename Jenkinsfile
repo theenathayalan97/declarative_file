@@ -2,36 +2,66 @@ pipeline {
     agent any
 
     environment {
-        IMAGE_NAME = "my-app-image"
-        IMAGE_TAG = "latest"
-        REPO_URL = "https://github.com/theenathayalan97/dockerImage.git"
-        BRANCH = "master"
+        DOCKERIMAGE = "touchworldtech/twt-touchtraks-inhouse-ui"
+        TAGNAME = "latest"
+        CLUSTERNAME = "twt-ap-south-2-prd-eks"
+        REGION = "ap-south-2"
+        DEPLOYMENT = "touchtracks-ui-prod"
+        NAMESPACE = "touchtracks-prod"
     }
 
     stages {
 
-        stage('Clone Repository') {
+        stage('Checkout Code') {
             steps {
-                git branch: "${BRANCH}", url: "${REPO_URL}"
+                git branch: '*/release/prod-release',
+                url: 'https://nixontwt@bitbucket.org/nixontwt/twt-touchtraks-inhouse-ui.git',
+                credentialsId: 'bitbucket-creds'
             }
         }
 
-        stage('Build Docker Image') {
+        stage('Install Dependencies') {
+            steps {
+                sh 'npm install --legacy-peer-deps'
+            }
+        }
+
+        stage('Build Application') {
+            steps {
+                sh 'npm run build -- --configuration production'
+            }
+        }
+
+        stage('Docker Build & Push') {
             steps {
                 script {
-                    sh "docker build -t ${IMAGE_NAME}:${IMAGE_TAG} ."
+                    TIMESTAMP = sh(script: "date +'%d%m%Y-%H%M%S'", returnStdout: true).trim()
+
+                    sh """
+                    docker build -t ${DOCKERIMAGE}:${TAGNAME} -t ${DOCKERIMAGE}:${TIMESTAMP} .
+                    docker push ${DOCKERIMAGE}:${TAGNAME}
+                    docker push ${DOCKERIMAGE}:${TIMESTAMP}
+                    """
                 }
             }
         }
 
+        stage('Deploy to EKS') {
+            steps {
+                sh """
+                aws eks update-kubeconfig --name ${CLUSTERNAME} --region ${REGION}
+                kubectl rollout restart deploy ${DEPLOYMENT} -n ${NAMESPACE}
+                """
+            }
+        }
     }
 
     post {
         success {
-            echo "Docker image built successfully!"
+            echo "Deployment Successful 🚀"
         }
         failure {
-            echo "Build failed!"
+            echo "Pipeline Failed ❌"
         }
     }
 }
